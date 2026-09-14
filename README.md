@@ -57,7 +57,7 @@ further down was superseded and is **not** in the shipped ROM. Full analysis:
 
 ## Build / flash workflow
 
-1. `scripts/patch_c3_v15.py <in original.tmp> <out body.bin>` produces a patched
+1. `scripts/patch_c3_v17.py <in original.tmp> <out body.bin>` produces a patched
    128 KB body. It self-checks: every cave write lands on 0xFF, E000 sum is made
    equal to stock via a compensator byte, F000 sum stays 0, all hook sites are
    asserted against expected stock bytes.
@@ -67,7 +67,12 @@ further down was superseded and is **not** in the shipped ROM. Full analysis:
    own compressor and fixes all checksums.
 3. `scripts/validate.py <rebuilt BH32_SP.BIN>` checks all ROM invariants; it
    passes all 7 official BH6 revisions and rejects bad builds.
-4. Write the rebuilt `.BIN` to the DOS floppy as `BH32_C3.BIN`, flash on the board
+4. `scripts/apply_early_cpu_fix.py <rebuilt BH32_SP.BIN> <out BH32_C3.BIN>` applies
+   the v16 early-CPU-check fix to the raw 256 KB ROM (the decompression block lives
+   outside `original.tmp`, so MODBIN never touches it) and recomputes the
+   decomp-block and per-4 KB page checksums. Run `scripts/validate.py` on the
+   result again.
+5. Write the final `.BIN` to the DOS floppy as `BH32_C3.BIN`, flash on the board
    with `awdflash`.
 
 DOSBox on this machine (xLin.x, labwc/Wayland) needs
