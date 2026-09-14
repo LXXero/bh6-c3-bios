@@ -1,0 +1,18 @@
+# Only the original base ROM and the final patched ROM are published.
+roms/*
+!roms/BH32_SP.BIN
+!roms/BH32_C3_v17_clean.BIN
+
+# Regenerable intermediates and extracted (copyrighted) Award modules
+bodies/
+modules/
+
+# Third-party tool binaries (MODBIN, lha) and local-only helpers
+tools/
+dos/
+traces/
+
+# Throwaway emulation harness: depends on a /tmp diag_core.py that isn't in the repo
+scripts/test_v16_emulation.py
+__pycache__/
+*.pyc

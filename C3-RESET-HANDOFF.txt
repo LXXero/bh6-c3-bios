@@ -1,0 +1,143 @@
+BH6 / VIA C3 CPU-settings reset: implementation handoff
+2026-09-07
+
+STATUS
+
+Diagnosis confirmed by measured hardware inputs and execution of the actual
+ROM routines in emulation. No replacement ROM was built or flashed by the
+reviewing agent. A corrected firmware still needs implementation and testing.
+
+EVIDENCE
+
+traces/C3CHECK.TXT reports:
+  Vendor: CentaurHauls
+  CPUID(1) EAX EBX ECX EDX: 0000068A 00000000 00000000 00803035
+  CPUID(1) EBX with BIOS input 00000680 -> 00000000
+  CMOS35=01, CMOS37=46, CMOS39=00, CMOS3A=00, CMOS41=03
+  Saved signature CMOS7E:7D=068A
+
+The live signature matches the saved signature. The subsequent Intel-specific
+CPU-type check compares CPUID(1).BL=00 with CMOS35&03=01. It fails and selects
+the CPU-defaults writer. This is deliberate firmware resetting of CPU settings,
+not evidence of general CMOS corruption. Date and boot order surviving is
+consistent with this targeted reset. Both configured checksums in the earlier
+full CMOS dump are valid; SET100's edits fall outside those checksum ranges.
+
+Actual early-ROM path with the measured inputs:
+  raw 0x37B8E: signature comparison passes
+  raw 0x37BB7: cmp bl,al fails (00 versus 01)
+  raw 0x37C7D: CPU-change fallback
+  raw 0x37D0B: load defaults, then write CMOS37=46 / CMOS41=03 / CMOS3A=00
+
+These defaults match the hardware dump. The fallback also sets CMOS39 bit 0;
+the later NAGCLR patch clears it, concealing the flag after settings were reset.
+
+IMPORTANT ADDRESS-MAPPING CLARIFICATION
+
+Patch the early RAW ROM code, not the corresponding offset in original.tmp.
+Direct byte comparison establishes:
+  Raw ROM 0x37BB7: cmp bl,al (early F000:7BB7 code).
+  Decompressed body 0x17BB7: setup-help text, not that instruction.
+
+The same runtime address has different contents before and after decompression.
+The entire raw routine 0x37AF1..0x37DBA is identical in stock SP and v14.
+A body-only modification cannot fix this early check. Apply the raw-ROM patch
+AFTER the final MODBIN rebuild, then checksum and validate the final image.
+
+WHAT TO IMPLEMENT
+
+1. Start from a known-booting pre-v15 baseline. Keep this test narrowly focused;
+   do not bundle v15's late forced-FSB workaround into the root-cause fix.
+
+2. Implement a vendor-aware exception to the inappropriate Intel CPU-type
+   comparison. For the supported Centaur CPU, AFTER the existing signature
+   comparison passes, bypass the Intel-specific test toward its normal success
+   continuation, raw 0x37BED. Determine safe hook/stub placement from the actual
+   code and available space; this handoff is not a ready-to-flash byte patch.
+
+3. Preserve Intel behavior, genuine CPU-signature-change detection, and
+   intentional recovery paths. Do not globally suppress defaults or bypass
+   all early checks. Preserve registers needed by subsequent code.
+
+4. Respect the early execution environment. This routine uses SS=F000 and
+   ROM-based return words selected via SP; it does not have an ordinary writable
+   stack. Do not introduce normal PUSH/CALL sequences without proving them safe.
+   Inline return words must not be mistaken for executable instructions during
+   linear disassembly.
+
+5. Do not use CMOS35=00 as the fix. Later identification can write type 01 back.
+   Audit early and later Centaur handling for consistency; the confirmed failure
+   is the inappropriate early comparison, not a need to force an arbitrary FSB.
+
+6. Extend scripts/diagnose_cpu_reset.py to load the candidate ROM and supply
+   selectable vendor responses. It currently loads v14 and supplies Centaur;
+   running it unchanged would NOT validate a new patch or Intel compatibility.
+   Verify with actual machine-code execution that:
+     - Measured C3 inputs preserve selected CPU settings.
+     - Intel behavior remains unchanged, including matching/mismatching types.
+     - Genuine signature changes still select the intended recovery path.
+     - Existing deliberate recovery conditions are not indiscriminately bypassed.
+   The harness is routine-level, not full POST/motherboard emulation. Board VID
+   inputs are mocked; its CMOS40/7C outputs are not hardware predictions.
+
+7. After the final raw patch, recompute the checksum at raw 0x37FFE using the
+   existing validator's convention: byte[0x37FFE] = sum(image[:0x37FFE]) & 0xFF.
+   Run scripts/validate.py on the final 262144-byte image. Inspect the binary
+   diff and verify only intended regions/checksum bytes changed. Preserve the
+   recovery image and existing recovery procedure before any hardware flash.
+
+8. Hardware acceptance: save the intended CPU settings, then verify persistence
+   through both Ctrl-Alt-Del and cold power cycles. Check actual running FSB and
+   AGP configuration separately; a stored CMOS value alone proves neither.
+
+WARNING-BYPASS CLEANUP
+
+NAGCLR should become unnecessary for this false CPU-change condition once the
+early comparison is corrected, but that must be verified on hardware.
+
+NAGCLR is not cosmetic: it clears CMOS39 bit 0 in both the RAM shadow and CMOS,
+and replaces the original validator check at BODY offset 0x44. Consequently it
+can mask legitimate CPU-change/recovery conditions.
+
+After verifying the root-cause fix, remove NAGCLR and restore the original check
+at body 0x44 from the verified baseline. Recheck warm/cold persistence and that
+the false warning does not recur. A genuine CPU change can still appropriately
+produce a warning; the goal is not to eliminate every warning.
+
+Keep the original Centaur detection/boot-hang fixes. Treat the SEPARATE
+preset-versus-computed-speed bypass at body 0x17A independently: it may still
+be needed for the C3's unsupported multiplier. This diagnosis does not establish
+that the original speed-validation check is valid for this CPU.
+
+WHY NOT v15 / OLD TRACE INTERPRETATION
+
+- v15 leaves the confirmed early raw-ROM reset intact.
+- Its late hook writes CMOS41=B7 and sets CMOS3A bit 6, but does not update the
+  corresponding RAM shadow. Executing the normal shadow-write loop afterward
+  restores the old values in emulation. This proves writeback can undo the hook,
+  not that the complete physical POST ordering has been traced.
+- External Clock "S" means spread-spectrum modulation, not a guaranteed
+  SEL100/66# assertion or AGP 2/3 selection. The BH6 manual treats SEL100/66# and
+  AGPCLK/CPUCLK as separate settings. Verify AGP independently.
+- The earlier CMOS33/34 snapshots are not pristine trace storage: normal
+  writeback covers those bytes, and stock code changes shadow33 bit 7. Final
+  values 83/03 do not prove two SoftMenu writes to CMOS41. That interpretation
+  has been retracted.
+
+REFERENCES / REPRODUCTION
+
+  CPU-RESET-DIAGNOSIS.md       Detailed offsets, evidence, caveats, source links.
+  traces/C3CHECK.TXT          Measured hardware CPUID and CMOS operands.
+  scripts/diagnose_cpu_reset.py
+                             Actual-ROM routine-level reproduction harness.
+  dos/C3CHECK.ASM / .COM      Read-only hardware diagnostic source/executable.
+  scripts/validate.py         Existing ROM integrity checks.
+
+Reproduction command (no flash or CMOS writes):
+  python scripts/diagnose_cpu_reset.py --ebx 00000000
+
+Run from the repository root. Dependencies are Unicorn 2.1.4 and
+Capstone 5.0.9 (pip install unicorn==2.1.4 capstone==5.0.9).
+
+BH6 manual source for spread spectrum / separate AGP and SEL settings:
+  https://manualzz.com/doc/82315271/abit-bh6-user-manual
