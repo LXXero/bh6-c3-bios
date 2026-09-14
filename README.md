@@ -1,23 +1,37 @@
-# ABIT BH6 + VIA C3 "Nehemiah" — BIOS patch project
+# ABIT BH6 (v1.1 / v1.2) + VIA C3 "Ezra-T" — BIOS patch project
 
 Goal: make a **VIA C3 (CentaurHauls, CPUID family 6, locked 10× multiplier)**
 run at **100 MHz FSB × 10 = 1000 MHz** on an **ABIT BH6** (i440BX, Award BIOS
 4.51PG, "SP" revision) by patching the BIOS. The stock BH6 does not know the C3:
 it mis-detects it, refuses the settings, and cold-boots it at 66 MHz × 10 = 667.
 
-Status as of 2026-09-07: detection, naming, multiplier, and the "CPU unworkable"
-nag are **solved and proven on hardware**. The **FSB-won't-stick-at-100** problem
-is the last item; **v15 is the candidate fix** (built, flashed pending test).
+**Status: SOLVED and proven on hardware (2026-09-07), released as
+[v1.0](https://github.com/LXXero/bh6-c3-bios/releases/tag/v1.0).** Detection,
+naming, the multiplier, the "CPU unworkable" nag *and* the FSB-won't-stick-at-100
+problem are all fixed. The real root cause of the FSB reset was **not** in the
+SoftMenu apply path: an early CPU-type check in the directly-mapped decompression
+block (raw ROM `0x37BB7`, outside `original.tmp`, so MODBIN never touched it)
+mis-classified the model-8 C3 as a CPU change and restored CPU defaults on every
+cold boot. v16 fixed it with a vendor-aware cave that excuses CentaurHauls
+(`scripts/apply_early_cpu_fix.py`, applied to the raw ROM after the MODBIN rebuild,
+recomputing both the decomp-block and the per-4 KB page checksums); v17 is the clean
+production build shipped in the release. The v15 "FSBFIX" clock-apply hook described
+further down was superseded and is **not** in the shipped ROM. Full analysis:
+`CPU-RESET-DIAGNOSIS.md` and `C3-RESET-HANDOFF.txt`.
+
+**Board revisions: ABIT BH6 v1.1 / v1.2 only** — the ROM is built from the BH32
+"SP" BIOS for those revisions. Do not flash it to other BH6 revisions or boards.
 
 ---
 
 ## The hardware / environment
 
-- Board: ABIT BH6 (i440BX), Award 4.51PG, SoftMenu II, clock synth = ICS9148
+- Board: ABIT BH6 **v1.1 / v1.2** (i440BX), Award 4.51PG, SoftMenu II, clock synth = ICS9148
   programmed over SMBus (I/O 0x5000, device address 0xD2). Fixed-mode synth: one
   "mode byte" per FSB selection sets CPU + PCI + AGP-ref together.
-- CPU under test: VIA C3 Nehemiah, ceramic package, marked 100×10. Vendor string
-  "CentaurHauls". A second C3 is a 133 part. Slotket currently strapped to 100.
+- CPU under test: VIA C3 marked "Nehemiah" but an **Ezra-T by CPUID** (vendor
+  "CentaurHauls", family 6 model 8, CPUID.1 EAX `0x068A`), ceramic package, marked
+  100×10. A second C3 is a 133 part. Slotket currently strapped to 100.
 - Stock ROM: `roms/BH32_SP.BIN` (256 KB, md5 `236165383346b718189c7c97fe61aef4`).
 - Recovery is proven: bootblock + a DOS floppy with stock `BH32_SP.BIN` and
   `awdflash` always brings it back after a bad flash. A TL866 + PLCC32 adapter is
@@ -61,9 +75,11 @@ usually clicks Update File by hand.
 
 ---
 
-## What the patches do (v15 = current)
+## What the body patches do (v12 lineage — proven on hardware)
 
-`scripts/patch_c3_v15.py` = v12 (all proven-on-hardware) + the FSB fix. In order:
+The shipped body patch is `scripts/patch_c3_v17.py` (the v12 lineage below, cleaned
+of the v14 trace instrumentation and the superseded v15 FSB hook); the raw-ROM
+early-CPU-check fix is applied on top by `scripts/apply_early_cpu_fix.py`. In order:
 
 1. **Vendor detect + POST name (PROVEN).** The BH6 vendor-dispatch table at body
    0x3443 is 14-byte entries `[handler ptr][12-byte vendor string]`. We repoint
@@ -91,12 +107,18 @@ usually clicks Update File by hand.
    (CMOS 0x41) is carried shadow<->CMOS. (Checksum ranges are a separate table and
    unchanged; 0x41 and 0x3A are in the un-checksummed gap, safe to poke.)
 
-6. **>>> THE v15 FSB FIX <<<** — force 100 MHz FSB at clock-apply time for the C3.
-   See next section.
+6. **v15 "FSBFIX" clock-apply hook — SUPERSEDED, not shipped.** It forced 100 MHz
+   at clock-apply time; the real reset happens far earlier (see Status). Kept in the
+   next section because the synth/FSB analysis there is still correct.
 
 ---
 
-## The FSB problem and the v15 fix (the part to review)
+## The FSB problem and the v15 attempt (historical — superseded)
+
+> The clock-synth / CMOS analysis in this section is correct and was essential, but
+> the v15 hook it proposes was superseded: the FSB reset originates in an early
+> CPU-type check in the decompression block (see Status and `CPU-RESET-DIAGNOSIS.md`).
+> The "open questions" at the end are answered by that finding.
 
 ### Symptom
 Multiplier (10×) sticks, but FSB will not stay at 100 across a **cold** boot.
@@ -171,10 +193,12 @@ part. The multiplier is already forced to 10 by patch #2, so the result is
 
 ---
 
-## File map
+## File map (local working tree — only `roms/`, `scripts/` and the docs are published; see Repository contents)
 
-- `scripts/patch_c3_v15.py` — current candidate. v8..v12 are the working lineage;
-  v2/v4/v6/v7 are dead ends kept for history (see patch-notes).
+- `scripts/patch_c3_v17.py` — shipped body patch; `scripts/apply_early_cpu_fix.py`
+  then applies the v16 raw-ROM early-CPU-check fix. v8..v12 are the working lineage;
+  v14/v15 are the trace and FSB-hook experiments; v2/v4/v6/v7 are dead ends kept for
+  history (see patch-notes).
 - `scripts/validate.py`, `scripts/awardrebuild.py` — ROM checksum tooling.
 - `bodies/BH6_SP_original.tmp` — decompressed stock body (patch input, all offsets
   are relative to this). `body_v12/14/15_patched.bin` — patched bodies.
@@ -215,4 +239,4 @@ vcore[4:0], **0x41** FSB[7:3]/SEL.2, 0x60 multiplier[4:0], 0x7C VID.
 
 Not included: intermediate decompressed bodies, extracted Award modules, third-party tools (MODBIN, lha) and unrelated BIOS dumps — they are regenerable or obtainable elsewhere and add nothing for end users.
 
-**Flash at your own risk.** This is a modified BIOS for one specific board (ABIT BH6) and CPU (VIA C3). Verify checksums with `scripts/validate.py` before flashing, and keep a recovery path (hot-flash / spare chip).
+**Flash at your own risk.** This is a modified BIOS for one specific board revision (ABIT BH6 v1.1 / v1.2) and CPU (VIA C3). Verify checksums with `scripts/validate.py` before flashing, and keep a recovery path (hot-flash / spare chip).
