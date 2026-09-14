@@ -29,9 +29,11 @@ further down was superseded and is **not** in the shipped ROM. Full analysis:
 - Board: ABIT BH6 **v1.1 / v1.2** (i440BX), Award 4.51PG, SoftMenu II, clock synth = ICS9148
   programmed over SMBus (I/O 0x5000, device address 0xD2). Fixed-mode synth: one
   "mode byte" per FSB selection sets CPU + PCI + AGP-ref together.
-- CPU under test: VIA C3 marked "Nehemiah" but an **Ezra-T by CPUID** (vendor
-  "CentaurHauls", family 6 model 8, CPUID.1 EAX `0x068A`), ceramic package, marked
-  100×10. A second C3 is a 133 part. Slotket currently strapped to 100.
+- CPU under test: VIA C3 marked **"1000AMHz"** (1000 MHz, 100 MHz bus). It is an
+  **Ezra-T** — CPUID vendor "CentaurHauls", family 6 model 8, CPUID.1 EAX `0x068A`;
+  the 100 MHz bus ("A" part) is the Ezra-T tell (it was initially mis-identified as
+  a Nehemiah). Ceramic package. A second C3 is a 133 part. Slotket currently
+  strapped to 100.
 - Stock ROM: `roms/BH32_SP.BIN` (256 KB, md5 `236165383346b718189c7c97fe61aef4`).
 - Recovery is proven: bootblock + a DOS floppy with stock `BH32_SP.BIN` and
   `awdflash` always brings it back after a bad flash. A TL866 + PLCC32 adapter is
